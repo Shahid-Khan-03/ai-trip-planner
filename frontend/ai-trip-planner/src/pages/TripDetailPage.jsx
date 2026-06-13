@@ -42,13 +42,13 @@ const TripDetailPage = () => {
         setLoading(false);
       }
     };
-
     fetchDetails();
   }, [id]);
 
   const generateAiPlan = async () => {
     try {
       setAiLoading(true);
+      setError('');
       const result = await aiService.generateItinerary({
         tripId: Number(id),
         preferences: trip?.interest || '',
@@ -75,23 +75,35 @@ const TripDetailPage = () => {
           <p className="muted">{trip.interest} | {formatCurrency(trip.budget)}</p>
         </div>
         <div className="hero-actions">
-          <button className="button primary" type="button" onClick={generateAiPlan} disabled={aiLoading}>
+          <button
+            className="button primary"
+            type="button"
+            onClick={generateAiPlan}
+            disabled={aiLoading}
+          >
             {aiLoading ? 'Generating...' : 'Generate AI Itinerary'}
           </button>
           <Link className="button ghost" to={`/trips/${id}/budget`}>Budget</Link>
         </div>
       </div>
 
+      {/*  Right sidebar — Weather only */}
       <div className="layout-two">
         <section>
           <h2>Itinerary</h2>
           <ItineraryView days={days} activities={activities} />
         </section>
-        <aside className="stack">
+        <aside>
           <WeatherWidget weather={weather} />
-          <AiItineraryPreview result={aiResult} />
         </aside>
       </div>
+
+      {/*  AI Preview — full width below, only shown when result exists */}
+      {aiResult && (
+        <div style={{ marginTop: '32px' }}>
+          <AiItineraryPreview result={aiResult} />
+        </div>
+      )}
     </main>
   );
 };

@@ -35,18 +35,18 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 public class ImplAiService implements AiService {
 
+    private final HttpClient httpClient;
     private final TripRepository tripRepository;
     private final DayRepository dayRepository;
     private final ActivityRepository activityRepository;
     private final BudgetRepository budgetRepository;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
     private final Map<String, Map<String, Object>> itineraryCache = new ConcurrentHashMap<>();
 
     @Value("${gemini.api.key:}")
     private String geminiApiKey;
 
-    @Value("${gemini.model:gemini-1.5-flash}")
+    @Value("${gemini.model:gemini-3.5-flash}")
     private String geminiModel;
 
     public ImplAiService(
@@ -110,7 +110,6 @@ public class ImplAiService implements AiService {
 
     @Override
     public String buildPrompt(AiRequest request) {
-        //Now throws TripNotFoundException instead of RuntimeException
         Trip trip = tripRepository.findById(request.getTripId())
                 .orElseThrow(() -> new TripNotFoundException(request.getTripId()));
 
@@ -175,34 +174,41 @@ public class ImplAiService implements AiService {
             JsonNode root = objectMapper.readTree(aiResponse);
 
             if (root.has("error")) {
-                String errorMsg = root.path("error").path("message").asText("Gemini API request failed");
+                String errorMsg = root.path("error").path("message")
+                        .asText("Gemini API request failed");
                 throw new AiServiceException(errorMsg);
             }
 
-            String content = root.path("candidates")
-                    .path(0)
+            JsonNode candidates = root.path("candidates");
+            if (candidates.isMissingNode() || !candidates.isArray() || candidates.size() == 0) {
+                throw new AiServiceException("No candidates returned from Gemini API");
+            }
+
+            String content = candidates.get(0)
                     .path("content")
                     .path("parts")
-                    .path(0)
+                    .get(0)
                     .path("text")
                     .asText();
 
             if (content.isBlank()) {
-                throw new AiServiceException("Gemini API returned an empty response");
+                throw new AiServiceException("Empty response from Gemini API");
             }
 
-            return objectMapper.readValue(content, new TypeReference<Map<String, Object>>() {});
+            log.info("Gemini content length: {}", content.length());
+            return objectMapper.readValue(content,
+                    new TypeReference<Map<String, Object>>() {});
 
         } catch (IOException e) {
-            log.error("Failed to parse Gemini response: {}", e.getMessage());
-            //  Now throws AiServiceException instead of RuntimeException
-            throw new AiServiceException("Failed to parse AI response. Please try again.", e);
+            log.error("Failed parsing AI response: {}", aiResponse);
+            throw new AiServiceException("Invalid AI JSON response", e);
         }
     }
 
     private String callGemini(String prompt) {
         if (geminiApiKey == null || geminiApiKey.isBlank()) {
-            throw new AiServiceException("Gemini API key is missing. Set GEMINI_API_KEY environment variable.");
+            throw new AiServiceException(
+                    "Gemini API key is missing. Set GEMINI_API_KEY environment variable.");
         }
 
         log.info("Using Gemini model: {}", geminiModel);
@@ -210,41 +216,45 @@ public class ImplAiService implements AiService {
         try {
             Map<String, Object> body = Map.of(
                     "contents", List.of(Map.of(
-                            "parts", List.of(Map.of("text", prompt)))),
-                    "generationConfig", Map.of("temperature", 0.7));
+                            "parts", List.of(Map.of("text", prompt)))));
 
             HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create("https://generativelanguage.googleapis.com/v1/models/"
-                            + geminiModel + ":generateContent"))
+                    .uri(URI.create(
+                            "https://generativelanguage.googleapis.com/v1beta/models/"
+                            + geminiModel + ":generateContent?key=" + geminiApiKey))
                     .timeout(Duration.ofSeconds(60))
                     .header("Content-Type", "application/json")
-                    .header("x-goog-api-key", geminiApiKey)
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            objectMapper.writeValueAsString(body)))
                     .build();
 
-            HttpResponse<String> response = httpClient.send(httpRequest,
-                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient.send(
+                    httpRequest, HttpResponse.BodyHandlers.ofString());
 
-            //  429 - Rate limit → AiServiceException with statusCode 429
+            log.info("Gemini raw response: {}", response.body());
+
             if (response.statusCode() == 429) {
-                log.warn("Gemini rate limit hit for model: {}", geminiModel);
                 throw new AiServiceException(
                         "AI service is busy. Please wait a moment and try again.", 429);
             }
 
-            // Other errors → AiServiceException with actual statusCode
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 log.error("Gemini API error [{}]: {}", response.statusCode(), response.body());
                 throw new AiServiceException(
-                        "Gemini API failed with status " + response.statusCode(), 
+                        "Gemini API failed with status " + response.statusCode(),
                         response.statusCode());
             }
-
-            log.debug("Gemini responded with status: {}", response.statusCode());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+    log.error("Gemini API error [{}]: {}", response.statusCode(), response.body()); // already exists
+    log.error("KEY USED (first 10 chars): {}", geminiApiKey.substring(0, 10)); // ✅ add this
+    throw new AiServiceException(
+            "Gemini API failed with status " + response.statusCode(),
+            response.statusCode());
+}
             return response.body();
 
         } catch (AiServiceException ex) {
-            throw ex; // re-throw without wrapping
+            throw ex;
         } catch (IOException e) {
             throw new AiServiceException("Failed to call Gemini API", e);
         } catch (InterruptedException e) {
@@ -269,9 +279,8 @@ public class ImplAiService implements AiService {
         if (days == null || days.isEmpty()) return "none";
         StringBuilder summary = new StringBuilder();
         days.stream().limit(3).forEach(day ->
-            summary.append("Day ").append(day.getDayNumber())
-                   .append(" on ").append(day.getDate()).append("; ")
-        );
+                summary.append("Day ").append(day.getDayNumber())
+                       .append(" on ").append(day.getDate()).append("; "));
         return summary.toString();
     }
 

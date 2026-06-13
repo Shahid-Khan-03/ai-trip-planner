@@ -72,14 +72,17 @@ public class GlobalExceptionHandler {
                 .body(APIResponse.error(HttpStatus.BAD_REQUEST, ex.getMessage()));
     }
 
-    // 500 - Any uncaught exception
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<APIResponse<Void>> handleGeneric(Exception ex) {
-        log.error("Unexpected error: {}", ex.getMessage(), ex);
-        return ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(APIResponse.error(
-                        HttpStatus.INTERNAL_SERVER_ERROR,
-                        "Something went wrong. Please try again later."));
-    }
+   // 500 - Any uncaught exception
+@ExceptionHandler(Exception.class)
+public ResponseEntity<APIResponse<Void>> handleGeneric(Exception ex) {
+    //  Add this line temporarily to see full error in console
+    ex.printStackTrace();
+    log.error("Unexpected error type: {}", ex.getClass().getName());
+    log.error("Unexpected error message: {}", ex.getMessage(), ex);
+    return ResponseEntity
+            .status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .body(APIResponse.error(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Something went wrong. Please try again later."));
+}
 }

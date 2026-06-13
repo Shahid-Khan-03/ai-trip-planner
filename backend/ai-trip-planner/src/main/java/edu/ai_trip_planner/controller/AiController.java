@@ -13,7 +13,7 @@ import edu.ai_trip_planner.dto.response.APIResponse;
 import edu.ai_trip_planner.service.AiService;
 
 @RestController
-@RequestMapping("/api/ai")
+@RequestMapping("/ai")
 public class AiController {
 
     private final AiService aiService;
@@ -27,6 +27,7 @@ public class AiController {
     public ResponseEntity<APIResponse<Map<String, Object>>> generateItinerary(
             @RequestBody AiRequest request) {
         return ResponseEntity.ok(APIResponse.success(
+            
                 aiService.generateItinerary(request),
                 "Itinerary generated successfully"));
     }
